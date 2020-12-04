@@ -1,0 +1,153 @@
+version: '3.2'
+
+services:
+  elastalert:
+    build:
+      context: elastalert/
+    image: bitsensor/elastalert:3.0.0-beta.0
+    container_name: elastalert
+    volumes:
+      - type: bind
+        source: ./config/elastalert/elastalert.yaml
+        target: /opt/elastalert/config.yaml
+      - type: bind
+        source: ./config/elastalert/elastalert-test.yaml
+        target: /opt/elastalert/config-test.yaml
+      - type: bind
+        source: ./config/elastalert/config.json
+        target: /opt/elastalert-server/config/config.json
+#      - type: volume
+#        source: elastalert
+#        target: /opt/elastalert
+    ports:
+      - "3030:3030"
+      - "3333:3333"
+    depends_on:
+      - elasticsearch
+  elasticsearch:
+    build:
+      context: kafka-elk/elasticsearch/
+      args:
+        ELK_VERSION: $ELK_VERSION
+    container_name: elasticsearch
+    volumes:
+      - type: bind
+        source: ./kafka-elk/elasticsearch/config/elasticsearch.yml
+        target: /usr/share/elasticsearch/config/elasticsearch.yml
+        read_only: true
+      - type: volume
+        source: elasticsearch
+        target: /usr/share/elasticsearch/data
+    ports:
+      - "9200:9200"
+      - "9300:9300"
+    environment:
+      ES_JAVA_OPTS: "-Xmx256m -Xms256m"
+      ELASTIC_PASSWORD: changeme
+    networks:
+      elastic-kibana:
+        ipv4_address: 192.168.1.10
+      logstash-elastic:
+        ipv4_address: 192.168.2.10
+
+  logstash:
+    build:
+      context: kafka-elk/logstash/
+      args:
+        ELK_VERSION: $ELK_VERSION
+    container_name: logstash
+    volumes:
+      - type: bind
+        source: ./kafka-elk/logstash/config/logstash.yml
+        target: /usr/share/logstash/config/logstash.yml
+        read_only: true
+      - type: bind
+        source: ./kafka-elk/logstash/pipeline
+        target: /usr/share/logstash/pipeline
+        read_only: true
+    ports:
+      - "5000:5000"
+      - "9600:9600"
+    environment:
+      LS_JAVA_OPTS: "-Xmx256m -Xms256m"
+    networks:
+      logstash-elastic:
+        ipv4_address: 192.168.2.20
+      kafka-logstash:
+        ipv4_address: 192.168.3.20
+    depends_on:
+      - elasticsearch
+
+  kibana:
+    build:
+      context: kafka-elk/kibana/
+      args:
+        ELK_VERSION: $ELK_VERSION
+    container_name: kibana
+    volumes:
+      - type: bind
+        source: ./kafka-elk/kibana/config/kibana.yml
+        target: /usr/share/kibana/config/kibana.yml
+        read_only: true
+    ports:
+      - "5601:5601"
+    networks:
+      elastic-kibana:
+        ipv4_address: 192.168.1.20
+    depends_on:
+      - elasticsearch
+
+  zookeeper:
+    image: zookeeper
+    container_name: zookeeper
+    tty: true
+    ports:
+     - "2181:2181"
+    networks:
+      kafka-zookeeper:
+        ipv4_address: 192.168.4.20
+
+  kafka:
+    build:
+      context: kafka-elk/kafka/
+    container_name: kafka
+    tty: true
+    ports:
+     - "9092:9092"
+    networks:
+      kafka-logstash:
+        ipv4_address: 192.168.3.10
+      kafka-zookeeper:
+        ipv4_address: 192.168.4.10
+    environment:
+      KAFKA_ADVERTISED_HOST_NAME: $KAFKA_IP
+      KAFKA_ADVERTISED_PORT: 9092
+      KAFKA_CREATE_TOPICS: "topictest:1:1"
+      KAFKA_ZOOKEEPER_CONNECT: zookeeper:2181
+      KAFKA_HEAP_OPTS: "-Xmx4G -Xms4G"
+
+networks:
+  elastic-kibana:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 192.168.1.0/24
+  logstash-elastic:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 192.168.2.0/24
+  kafka-logstash:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 192.168.3.0/24
+  kafka-zookeeper:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 192.168.4.0/24
+
+volumes:
+  elasticsearch:
+#  elastalert:
